@@ -60,6 +60,7 @@ JMA_CO=@JMA_F@
 
 MAIN_AO=endmem.o init.o vcache.o ztime.o
 MAIN_CO=cfg.o initc.o input.o md.o patch.o ui.o version.o zdir.o\
+	unixdbg.o opcode.o debug-cli.o\
 	zloader.o zmovie.o zpath.o zstate.o ztimec.o
 
 MMLIB_CO=@MMLIB_F@

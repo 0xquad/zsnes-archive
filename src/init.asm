@@ -72,6 +72,10 @@ NEWSYM ZMVRawDump, db 0
 
 SECTION .text
 
+%ifdef __UNIXSDL__
+EXTSYM init_unix_debugger
+%endif
+
 NEWSYM init
     ; prevents a crash if cpalval gets accessed before initializing
     mov eax,cpalval
@@ -124,6 +128,9 @@ NEWSYM init
     ; SPC Init
     pushad
     call procexecloop
+%ifdef __UNIXSDL__
+    call init_unix_debugger
+%endif
     popad
     ; SNES Init
     pushad

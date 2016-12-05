@@ -29,6 +29,57 @@ EXTSYM SA1Status,IRAM,CurBWPtr,SA1RAMArea
 EXTSYM Sdd1Mode,Sdd1Bank,Sdd1Addr,Sdd1NewAddr,memtabler8,AddrNoIncr,SDD1BankA
 EXTSYM SDD1_init,SDD1_get_byte,BWShift,SA1BWPtr
 
+;*******************
+; Breakpoint stuff
+;*******************
+
+EXTSYM mem_watches
+EXTSYM print_regs, bp_exists, debug_menu
+
+%define MODE_READ   0x01
+%define MODE_WRITE  0x02
+
+; Check for a breakpoint on [wramdataa+ecx].
+%macro CheckMemoryBreakpoint8 1
+    pushad
+    cmp byte [mem_watches], 0
+    je %%nobp
+    push byte %1        ; MODE_READ or MODE_WRITE or (unlikely) both.
+    push ecx            ; offset
+    push ebx            ; bank
+    call bp_exists
+    add esp, byte 12
+    or al, al
+    jz %%nobp
+    call debug_menu
+%%nobp:
+    popad
+%endmacro
+
+; Check for a breakpoint on either [wramdataa+ecx] or [wramdataa+ecx+1].
+%macro CheckMemoryBreakpoint16 1
+    pushad
+    cmp byte [mem_watches], 0
+    je %%nobp
+    push byte %1        ; MODE_READ or MODE_WRITE or (unlikely) both.
+    push ecx            ; offset
+    push ebx            ; bank
+    call bp_exists
+    add esp, byte 12
+    push eax            ; save result
+    push byte %1
+    inc ecx
+    push ecx
+    push ebx
+    call bp_exists
+    add esp, byte 12
+    pop ebx             ; restore previous result
+    or al, bl           ; any of ecx or ecx+1 triggered a breakpoint?
+    jz %%nobp
+    call debug_menu
+%%nobp:
+    popad
+%endmacro
 ;*******************************************************
 ; Register & Memory Access Banks (0 - 3F) / (80 - BF)
 ;*******************************************************
@@ -47,7 +98,7 @@ NEWSYM regaccessbankr8
 .regacc
     cmp ecx,2000h
     jae .regs
-    mov al,[wramdataa+ecx]
+    call wramaccessbankr8
     ret
 .regs
     cmp ecx,48FFh
@@ -110,7 +161,7 @@ NEWSYM regaccessbankr16
 .regacc
     cmp ecx,2000h
     jae .regs
-    mov ax,[wramdataa+ecx]
+    call wramaccessbankr16
     cmp ecx,1FFFh
     jne .notopenbus
     mov ah,al
@@ -189,7 +240,7 @@ NEWSYM regaccessbankw8
     jnz .romacc
     cmp ecx,2000h
     jae .regs
-    mov [wramdataa+ecx],al
+    call wramaccessbankw8
     ret
 .romacc
     cmp byte[writeon],0
@@ -260,7 +311,7 @@ NEWSYM regaccessbankw16
     jae .regs
     cmp ecx,1FFFh
     je .endwram
-    mov [wramdataa+ecx],ax
+    call wramaccessbankw16
     ret
 .endwram
     mov [wramdataa+ecx],al
@@ -712,7 +763,10 @@ NEWSYM SA1UpdateDPage
 NEWSYM membank0r8ramSA1             ; 0000-1FFF
     cmp byte[SA1Status],0
     jne .nowram
-    mov al,[wramdataa+ecx+ebx]
+    push ecx
+    add ecx, ebx
+    call wramaccessbankr8
+    pop ecx
     ret
 .nowram
     cmp ecx,800h
@@ -725,7 +779,10 @@ NEWSYM membank0r8ramSA1             ; 0000-1FFF
 NEWSYM membank0r16ramSA1             ; 0000-1FFF
     cmp byte[SA1Status],0
     jne .nowram
-    mov ax,[wramdataa+ecx+ebx]
+    push ecx
+    add ecx, ebx
+    call wramaccessbankr16
+    pop ecx
     ret
 .nowram
     cmp ecx,800h
@@ -749,7 +806,10 @@ NEWSYM membank0w8ramSA1             ; 0000-1FFF
 NEWSYM membank0w16ramSA1             ; 0000-1FFF
     cmp byte[SA1Status],0
     jne .nowram
-    mov [wramdataa+ecx+ebx],ax
+    push ecx
+    add ecx, ebx
+    call wramaccessbankw16
+    pop ecx
     ret
 .nowram
     cmp ecx,800h
@@ -760,7 +820,13 @@ NEWSYM membank0w16ramSA1             ; 0000-1FFF
 
 ; --- 8 BIT READ STUFF ---
 NEWSYM membank0r8ram             ; 0000-1FFF
-    mov al,[wramdataa+ebx+ecx]
+    push ecx
+    push ebx
+    add ecx, ebx
+    xor ebx, ebx
+    call wramaccessbankr8
+    pop ebx
+    pop ecx
     ret
 NEWSYM membank0r8reg             ; 2000-48FF
     add ecx,ebx
@@ -809,7 +875,10 @@ NEWSYM membank0r8romram             ; 0000-1FFF
     add cx,bx
     test cx,8000h
     jnz .rom
-    mov al,[wramdataa+ecx]
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankr8
+    pop ebx
     ret
 .rom
     mov ebx,[snesmmap]
@@ -819,16 +888,28 @@ NEWSYM membank0r8romram             ; 0000-1FFF
 
 ; --- 16 BIT READ STUFF ---
 NEWSYM membank0r16ram             ; 0000-1EFF
-    mov ax,[wramdataa+ebx+ecx]
+    push ecx
+    push ebx
+    add ecx, ebx
+    xor ebx, ebx
+    call wramaccessbankr16
+    pop ebx
+    pop ecx
     ret
 NEWSYM membank0r16ramh            ; 1F00-1FFF
     add ecx,ebx
     cmp ecx,1FFFh
     je .over
-    mov ax,[wramdataa+ecx]
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankr16
+    pop ebx
     ret
 .over
-    mov al,[wramdataa+ecx]
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankr8
+    pop ebx
     mov ah,al ;open bus
     ret
 NEWSYM membank0r16reg             ; 2000-48FF
@@ -886,7 +967,10 @@ NEWSYM membank0r16romram             ; 0000-1FFF
     add cx,bx
     test cx,8000h
     jnz .rom
-    mov ax,[wramdataa+ecx]
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankr16
+    pop ebx
     ret
 .rom
     mov ebx,[snesmmap]
@@ -896,7 +980,13 @@ NEWSYM membank0r16romram             ; 0000-1FFF
 
 ; --- 8 BIT WRITE STUFF ---
 NEWSYM membank0w8ram             ; 0000-1FFF
-    mov [wramdataa+ebx+ecx],al
+    push ecx
+    push ebx
+    add ecx, ebx
+    xor ebx, ebx
+    call wramaccessbankw8
+    pop ebx
+    pop ecx
     ret
 NEWSYM membank0w8reg             ; 2000-48FF
     add ecx,ebx
@@ -938,23 +1028,36 @@ NEWSYM membank0w8romram             ; 0000-1FFF
     add cx,bx
     test cx,8000h
     jnz .rom
-    mov [wramdataa+ecx],al
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankw8
+    pop ebx
     ret
 .rom
     ret
 
 ; --- 16 BIT WRITE STUFF ---
 NEWSYM membank0w16ram             ; 0000-1EFF
-    mov [wramdataa+ebx+ecx],ax
+    push ecx
+    push ebx
+    add ecx, ebx
+    xor ebx, ebx
+    call wramaccessbankw16
+    pop ebx
+    pop ecx
     ret
 NEWSYM membank0w16ramh            ; 1F00-1FFF
     add ecx,ebx
+    push ebx
+    xor ebx, ebx
     cmp ecx,1FFFh
     je .over
-    mov [wramdataa+ecx],ax
+    call wramaccessbankw16
+    pop ebx
     ret
 .over
-    mov [wramdataa+ecx],al
+    call wramaccessbankw8
+    pop ebx
     ret
 NEWSYM membank0w16reg             ; 2000-48FF
     add ecx,ebx
@@ -999,7 +1102,10 @@ NEWSYM membank0w16romram             ; 0000-1FFF
     add cx,bx
     test cx,8000h
     jnz .rom
-    mov [wramdataa+ecx],ax
+    push ebx
+    xor ebx, ebx
+    call wramaccessbankw16
+    pop ebx
     ret
 .rom
     ret
@@ -1010,7 +1116,7 @@ NEWSYM membank0r8
     je near membank0r8SA1
     cmp ecx,2000h
     jae .regs
-    mov al,[wramdataa+ecx]
+    call wramaccessbankr8
     ret
 .regs
     test ecx,8000h
@@ -1059,7 +1165,7 @@ NEWSYM membank0r16
     je near membank0r16SA1
     cmp ecx,2000h
     jae .regs
-    mov ax,[wramdataa+ecx]
+    call wramaccessbankr16
     ret
 .regs
     test ecx,8000h
@@ -1119,7 +1225,7 @@ NEWSYM membank0w8
     je near membank0w8SA1
     cmp ecx,2000h
     jae .regs
-    mov [wramdataa+ecx],al
+    call wramaccessbankw8
     ret
 .romacc
     cmp byte[writeon],0
@@ -1169,7 +1275,7 @@ NEWSYM membank0w16
     je near membank0w16SA1
     cmp ecx,2000h
     jae .regs
-    mov [wramdataa+ecx],ax
+    call wramaccessbankw16
     ret
 .romacc
     cmp byte[writeon],0
@@ -1234,7 +1340,7 @@ NEWSYM membank0r8SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov al,[wramdataa+ecx]
+    call wramaccessbankr8
     ret
 .nowram
     cmp ecx,800h
@@ -1272,7 +1378,7 @@ NEWSYM membank0r16SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov ax,[wramdataa+ecx]
+    call wramaccessbankr16
     ret
 .nowram
     cmp ecx,800h
@@ -1312,7 +1418,7 @@ NEWSYM membank0w8SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov [wramdataa+ecx],al
+    call wramaccessbankw8
     ret
 .nowram
     cmp ecx,800h
@@ -1346,7 +1452,7 @@ NEWSYM membank0w16SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov [wramdataa+ecx],ax
+    call wramaccessbankw16
     ret
 .nowram
     cmp ecx,800h
@@ -1702,6 +1808,7 @@ NEWSYM wramaccessbankr8
 ;    mov ebx,[wramdata]
 ;    mov al,[ebx+ecx]
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint8 MODE_READ
     mov al,[wramdataa+ecx]
     ret
 
@@ -1709,6 +1816,7 @@ NEWSYM wramaccessbankr16
 ;    mov ebx,[wramdata]
 ;    mov ax,[ebx+ecx]
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint16 MODE_READ
     mov ax,[wramdataa+ecx]
     ret
 
@@ -1716,6 +1824,7 @@ NEWSYM wramaccessbankw8
 ;    mov ebx,[wramdata]
 ;    mov [ebx+ecx],al
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint8 MODE_WRITE
     mov [wramdataa+ecx],al
     ret
 
@@ -1723,6 +1832,7 @@ NEWSYM wramaccessbankw16
 ;    mov ebx,[wramdata]
 ;    mov [ebx+ecx],ax
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint16 MODE_WRITE
     mov [wramdataa+ecx],ax
     ret
 
@@ -1733,6 +1843,7 @@ NEWSYM eramaccessbankr8
 ;    mov ebx,[ram7f]
 ;    mov al,[ebx+ecx]
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint8 MODE_READ
     mov al,[ram7fa+ecx]
     ret
 
@@ -1740,6 +1851,7 @@ NEWSYM eramaccessbankr16
 ;    mov ebx,[ram7f]
 ;    mov ax,[ebx+ecx]
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint16 MODE_READ
     mov ax,[ram7fa+ecx]
     ret
 
@@ -1747,6 +1859,7 @@ NEWSYM eramaccessbankw8
 ;    mov ebx,[ram7f]
 ;    mov [ebx+ecx],al
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint8 MODE_WRITE
     mov [ram7fa+ecx],al
     ret
 
@@ -1754,6 +1867,7 @@ NEWSYM eramaccessbankw16
 ;    mov ebx,[ram7f]
 ;    mov [ebx+ecx],ax
 ;    xor ebx,ebx
+    CheckMemoryBreakpoint16 MODE_WRITE
     mov [ram7fa+ecx],ax
     ret
 
@@ -1773,7 +1887,7 @@ NEWSYM regaccessbankr8SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov al,[wramdataa+ecx]
+    call wramaccessbankr8
     ret
 .nowram
     cmp ecx,800h
@@ -1811,7 +1925,7 @@ NEWSYM regaccessbankr16SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov ax,[wramdataa+ecx]
+    call wramaccessbankr16
     ret
 .nowram
     cmp ecx,800h
@@ -1851,7 +1965,7 @@ NEWSYM regaccessbankw8SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov [wramdataa+ecx],al
+    call wramaccessbankw8
     ret
 .nowram
     cmp ecx,800h
@@ -1892,7 +2006,7 @@ NEWSYM regaccessbankw16SA1
     jae .regs
     cmp byte[SA1Status],0
     jne .nowram
-    mov [wramdataa+ecx],ax
+    call wramaccessbankw16
     ret
 .nowram
     cmp ecx,800h

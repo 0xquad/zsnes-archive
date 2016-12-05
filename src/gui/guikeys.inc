@@ -253,6 +253,10 @@ UseExtKey resb 1
 
 SECTION .text
 
+%ifdef __UNIXSDL__
+EXTSYM handle_debugger_keys
+%endif
+
 GUIgetcurrentinput:
   mov byte[UseExtKey],0
   xor cx,cx
@@ -261,6 +265,16 @@ GUIgetcurrentinput:
   or al,al
   jz .nokeyd
   call Get_Key
+%ifdef __UNIXSDL__
+  push eax
+  movzx eax, al
+  push eax
+  ;EXTSYM print_arg
+  ;call print_arg
+  call handle_debugger_keys
+  add esp, byte 4
+  pop eax
+%endif
   cmp cl,0
   jne .nostorekey
   mov ch,al
